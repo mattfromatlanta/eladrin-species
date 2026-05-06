@@ -6,7 +6,7 @@
  *  1. Season + DC ability setup dialog, triggered automatically when the
  *     Eladrin species item is assigned via the advancement manager.
  *  2. Long rest Trance dialog: season change + temporary weapon/tool profs.
- *  3. Fey Step seasonal macro (attach via Activity Macro module).
+ *  3. Fey Step seasonal effect, triggered via dnd5e.postUseActivity hook.
  */
 
 const MODULE_ID = "eladrin-species";
@@ -373,125 +373,99 @@ Hooks.on("dnd5e.restCompleted", async (actor, data) => {
     });
 });
 
-// ── Fey Step Macro ────────────────────────────────────────────────────────────
-// Attach this to the Fey Step item's Use activity via the Activity Macro module.
-// The macro reads the actor's current season flag and applies the appropriate
-// level-3+ effect. Below level 3, exits silently (teleport only, no rider).
-//
-// To use: install Activity Macro module, open the Fey Step feature item,
-// go to the Macros tab, and attach a macro containing this code.
-// The variables `actor`, `item`, and `token` are provided by Activity Macro.
+// ── Hook 3: Fey Step activity use → seasonal effect ───────────────────────────
+// Fires after ANY activity is used; we filter to Fey Step on Eladrin actors.
 
-/**
- * FEY_STEP_MACRO — paste this into a Macro document, then attach it to
- * the Fey Step item's activity via the Activity Macro module.
- */
-const FEY_STEP_MACRO = `
-const MODULE_ID = "eladrin-species";
-const level = actor.system.details?.level ?? 0;
-if (level < 3) return; // No rider effect below 3rd level
+Hooks.on("dnd5e.postUseActivity", async (activity, usageConfig, results) => {
+    const actor = activity.actor;
+    if (!actor || !isEladrin(actor)) return;
 
-const season = actor.getFlag(MODULE_ID, "season") ?? "summer";
-const dcAbility = actor.getFlag(MODULE_ID, "saveDCAbility") ?? "cha";
-const abilityMod = actor.system.abilities?.[dcAbility]?.mod ?? 0;
-const prof = actor.system.attributes?.prof ?? 2;
-const saveDC = 8 + prof + abilityMod;
-const targets = [...game.user.targets];
+    if (activity.item?.name !== "Fey Step") return;
 
-const COLORS = {
-  autumn: "#b85c1a", winter: "#5b9ebd",
-  spring: "#c45c7a", summer: "#c49a1a"
-};
-const color = COLORS[season] ?? "#7b68ee";
+    const level = actor.system.details?.level ?? 0;
+    if (level < 3) return;
 
-async function rollSave(target) {
-  return target.actor.rollAbilitySave("wis", {
-    targetValue: saveDC,
-    chatMessage: true
-  });
-}
+    const season = actor.getFlag(MODULE_ID, "season") ?? "summer";
+    const dcAbility = actor.getFlag(MODULE_ID, "saveDCAbility") ?? "cha";
+    const abilityMod = actor.system.abilities?.[dcAbility]?.mod ?? 0;
+    const prof = actor.system.attributes?.prof ?? 2;
+    const saveDC = 8 + prof + abilityMod;
+    const targets = [...game.user.targets];
+    const s = SEASONS[season];
 
-switch (season) {
-
-  case "autumn": {
-    if (!targets.length) {
-      return ui.notifications.warn("Autumn Fey Step: target up to 2 creatures first.");
+    async function rollSave(target) {
+        return target.actor.rollAbilitySave("wis", {
+            targetValue: saveDC,
+            chatMessage: true
+        });
     }
-    const victims = targets.size > 2 ? [...targets].slice(0, 2) : [...targets];
-    for (const t of victims) {
-      const roll = await rollSave(t);
-      if (roll && roll.total < saveDC) {
-        await t.actor.toggleStatusEffect("charmed", { active: true });
-      }
-    }
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: \`<div style="border:2px solid \${color};border-radius:6px;padding:8px;">
-        <strong>🍂 Autumn Fey Step</strong><br>
-        <em>\${victims.map(t=>t.name).join(", ")} make DC \${saveDC} Wisdom saves or are <strong>Charmed</strong> for 1 minute.</em>
-      </div>\`
-    });
-    break;
-  }
 
-  case "winter": {
-    if (!targets.size) {
-      return ui.notifications.warn("Winter Fey Step: target 1 creature first.");
-    }
-    const t = [...targets][0];
-    const roll = await rollSave(t);
-    if (roll && roll.total < saveDC) {
-      await t.actor.toggleStatusEffect("frightened", { active: true });
-    }
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: \`<div style="border:2px solid \${color};border-radius:6px;padding:8px;">
-        <strong>❄️ Winter Fey Step</strong><br>
-        <em>\${t.name} makes a DC \${saveDC} Wisdom save or is <strong>Frightened</strong> until end of your next turn.</em>
-      </div>\`
-    });
-    break;
-  }
+    switch (season) {
 
-  case "spring": {
-    if (!targets.size) {
-      return ui.notifications.warn("Spring Fey Step: target the willing ally first.");
-    }
-    const t = [...targets][0];
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: \`<div style="border:2px solid \${color};border-radius:6px;padding:8px;">
-        <strong>🌸 Spring Fey Step</strong><br>
-        <em>\${t.name} teleports up to 30ft to an unoccupied space \${actor.name} chooses.
-        (Resolve token placement manually.)</em>
-      </div>\`
-    });
-    break;
-  }
+        case "autumn": {
+            if (!targets.length)
+                return ui.notifications.warn("Autumn Fey Step: target up to 2 creatures first.");
+            const victims = targets.slice(0, 2);
+            for (const t of victims) {
+                const roll = await rollSave(t);
+                if (roll?.total < saveDC)
+                    await t.actor.toggleStatusEffect("charmed", { active: true });
+            }
+            await ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `<div style="border:2px solid ${s.color};border-radius:6px;padding:8px;background:#fafafa;">
+          <strong>🍂 Autumn Fey Step</strong><br>
+          <em>${victims.map(t => t.name).join(", ")} make a DC ${saveDC} Wisdom save
+          or are <strong>Charmed</strong> for 1 minute (breaks on damage).</em></div>`
+            });
+            break;
+        }
 
-  case "summer": {
-    if (!targets.size) {
-      return ui.notifications.warn("Summer Fey Step: target creatures within 5ft first.");
-    }
-    const damage = prof;
-    for (const t of targets) {
-      await t.actor.applyDamage([{ value: damage, type: "fire" }]);
-    }
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      content: \`<div style="border:2px solid \${color};border-radius:6px;padding:8px;">
-        <strong>☀️ Summer Fey Step</strong><br>
-        <em>\${[...targets].map(t=>t.name).join(", ")} take
-        <strong>\${damage} fire damage</strong>.</em>
-      </div>\`
-    });
-    break;
-  }
-}
-`;
+        case "winter": {
+            if (!targets.length)
+                return ui.notifications.warn("Winter Fey Step: target 1 creature first.");
+            const t = targets[0];
+            const roll = await rollSave(t);
+            if (roll?.total < saveDC)
+                await t.actor.toggleStatusEffect("frightened", { active: true });
+            await ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `<div style="border:2px solid ${s.color};border-radius:6px;padding:8px;background:#fafafa;">
+          <strong>❄️ Winter Fey Step</strong><br>
+          <em>${t.name} makes a DC ${saveDC} Wisdom save
+          or is <strong>Frightened</strong> until end of your next turn.</em></div>`
+            });
+            break;
+        }
 
-// Export the macro string so you can access it from the console if needed:
-// game.modules.get("eladrin-species").api.FEY_STEP_MACRO
-Hooks.once("ready", () => {
-    game.modules.get(MODULE_ID).api = { FEY_STEP_MACRO };
+        case "spring": {
+            if (!targets.length)
+                return ui.notifications.warn("Spring Fey Step: target the willing ally first.");
+            const t = targets[0];
+            await ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `<div style="border:2px solid ${s.color};border-radius:6px;padding:8px;background:#fafafa;">
+          <strong>🌸 Spring Fey Step</strong><br>
+          <em>${t.name} teleports up to 30ft to an unoccupied space
+          ${actor.name} chooses. (Resolve token placement manually.)</em></div>`
+            });
+            break;
+        }
+
+        case "summer": {
+            if (!targets.length)
+                return ui.notifications.warn("Summer Fey Step: target creatures within 5ft first.");
+            const damage = prof;
+            for (const t of targets)
+                await t.actor.applyDamage([{ value: damage, type: "fire" }]);
+            await ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `<div style="border:2px solid ${s.color};border-radius:6px;padding:8px;background:#fafafa;">
+          <strong>☀️ Summer Fey Step</strong><br>
+          <em>${targets.map(t => t.name).join(", ")} take
+          <strong>${damage} fire damage</strong>.</em></div>`
+            });
+            break;
+        }
+    }
 });
