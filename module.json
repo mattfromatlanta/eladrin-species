@@ -1,0 +1,33 @@
+{
+  "id": "eladrin-species",
+  "title": "Eladrin Species (Monsters of the Multiverse)",
+  "description": "Adds the Eladrin as a fully automated playable species for D&D 5e 2024 rules. Includes Fey Step with seasonal effects, Trance proficiency prompts on long rest, and season selection integrated into the character creation advancement flow.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "12",
+    "verified": "14"
+  },
+  "authors": [{ "name": "Your Name" }],
+  "esmodules": ["scripts/eladrin.js"],
+  "packs": [
+    {
+      "name": "eladrin-items",
+      "label": "Eladrin Species",
+      "path": "./packs/eladrin-items",
+      "type": "Item",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "TRUSTED": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    }
+  ],
+  "packFolders": [
+    {
+      "name": "Eladrin",
+      "sorting": "a",
+      "packs": ["eladrin-items"]
+    }
+  ]
+}
