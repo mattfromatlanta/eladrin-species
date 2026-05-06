@@ -1,0 +1,10 @@
+{
+  "name": "eladrin-species",
+  "scripts": {
+    "pack": "fvtt package pack eladrin-items --in ./src/packs --out ./packs",
+    "unpack": "fvtt package unpack eladrin-items --in ./packs --out ./src/packs/eladrin-items"
+  },
+  "devDependencies": {
+    "@foundryvtt/foundryvtt-cli": "latest"
+  }
+}

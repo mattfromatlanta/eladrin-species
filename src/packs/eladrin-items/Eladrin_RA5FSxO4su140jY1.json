@@ -1,0 +1,162 @@
+{
+  "name": "Eladrin",
+  "type": "race",
+  "_id": "RA5FSxO4su140jY1",
+  "img": "assets/item_art/Eladrin.png",
+  "system": {
+    "advancement": {
+      "QazEsuTq05FtiBKJ": {
+        "type": "Size",
+        "_id": "QazEsuTq05FtiBKJ",
+        "configuration": {
+          "sizes": [
+            "med"
+          ]
+        },
+        "flags": {},
+        "level": 0,
+        "hint": "",
+        "value": {}
+      },
+      "7hc4aq1kcVPbEPYw": {
+        "type": "Trait",
+        "title": "Keen Senses",
+        "_id": "7hc4aq1kcVPbEPYw",
+        "configuration": {
+          "allowReplacements": false,
+          "choices": [],
+          "grants": [
+            "skills:prc"
+          ],
+          "mode": "default"
+        },
+        "flags": {},
+        "level": 0,
+        "hint": ""
+      },
+      "Mb9HnDi3xOKrzOQW": {
+        "type": "Trait",
+        "title": "Languages",
+        "_id": "Mb9HnDi3xOKrzOQW",
+        "configuration": {
+          "allowReplacements": true,
+          "choices": [
+            {
+              "count": 1,
+              "pool": [
+                "languages:standard:*",
+                "languages:exotic:sylvan"
+              ]
+            }
+          ],
+          "grants": [
+            "languages:standard:common",
+            "languages:standard:elvish"
+          ],
+          "mode": "default"
+        },
+        "flags": {},
+        "level": 0,
+        "hint": ""
+      },
+      "e4UjImO7NiLzn5bz": {
+        "type": "ItemGrant",
+        "_id": "e4UjImO7NiLzn5bz",
+        "configuration": {
+          "items": [
+            {
+              "uuid": "Compendium.eladrin-species.eladrin-items.Item.j5560eIxEZ6Lifp4",
+              "optional": false
+            }
+          ],
+          "optional": false,
+          "spell": null
+        },
+        "flags": {},
+        "value": {},
+        "level": 0,
+        "hint": "",
+        "title": "Fey Step"
+      },
+      "ZMgSvV7Uq9SR8FfR": {
+        "type": "ItemGrant",
+        "_id": "ZMgSvV7Uq9SR8FfR",
+        "configuration": {
+          "items": [
+            {
+              "uuid": "Compendium.eladrin-species.eladrin-items.Item.dAapT1TNVFrhfXCC",
+              "optional": false
+            }
+          ],
+          "optional": false,
+          "spell": null
+        },
+        "flags": {},
+        "value": {},
+        "level": 0,
+        "hint": "<p>You don't need to sleep, and magic can't put you to sleep. You finish a long rest in 4 hours of trancelike meditation while retaining consciousness. When you finish this trance, you can change your season and gain proficiency with two weapons or tools of your choice until your next long rest, drawn from shared elven memory.</p>",
+        "title": "Trance"
+      }
+    },
+    "description": {
+      "value": "",
+      "chat": ""
+    },
+    "identifier": "eladrin",
+    "source": {
+      "revision": 1,
+      "rules": "2024",
+      "book": "Mordenkainen Presents: Monsters of the Multiverse",
+      "page": "",
+      "custom": "",
+      "license": ""
+    },
+    "movement": {
+      "units": "ft",
+      "hover": false,
+      "ignoredDifficultTerrain": [],
+      "walk": "30",
+      "burrow": "",
+      "climb": "",
+      "fly": "",
+      "swim": ""
+    },
+    "senses": {
+      "ranges": {
+        "blindsight": null,
+        "darkvision": 60,
+        "tremorsense": null,
+        "truesight": null
+      },
+      "units": "ft",
+      "special": ""
+    },
+    "type": {
+      "value": "humanoid"
+    }
+  },
+  "effects": [],
+  "folder": null,
+  "sort": 0,
+  "ownership": {
+    "default": 0,
+    "Le4JHgEIDIZ0wv5M": 3
+  },
+  "flags": {
+    "eladrin-species": {
+      "isEladrinSpeciesItem": true
+    }
+  },
+  "_stats": {
+    "coreVersion": "14.360",
+    "systemId": "dnd5e",
+    "systemVersion": "5.3.2",
+    "createdTime": 1778100481132,
+    "modifiedTime": 1778101235911,
+    "lastModifiedBy": "Le4JHgEIDIZ0wv5M",
+    "compendiumSource": null,
+    "duplicateSource": null,
+    "exportSource": null
+  },
+  "_key": "!items!RA5FSxO4su140jY1"
+}

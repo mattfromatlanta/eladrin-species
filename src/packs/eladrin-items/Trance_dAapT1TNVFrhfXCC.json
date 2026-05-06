@@ -1,0 +1,57 @@
+{
+  "name": "Trance",
+  "type": "feat",
+  "_id": "dAapT1TNVFrhfXCC",
+  "img": "systems/dnd5e/icons/svg/items/feature.svg",
+  "system": {
+    "activities": {},
+    "uses": {
+      "spent": 0,
+      "recovery": [],
+      "max": ""
+    },
+    "advancement": {},
+    "description": {
+      "value": "<p>You don't need to sleep, and magic can't put you to sleep. You finish a long rest in 4 hours of trancelike meditation while retaining consciousness. When you finish this trance, you can change your season and gain proficiency with two weapons or tools of your choice until your next long rest, drawn from shared elven memory.</p>",
+      "chat": ""
+    },
+    "identifier": "trance",
+    "source": {
+      "revision": 1,
+      "rules": "2024"
+    },
+    "crewed": false,
+    "enchant": {},
+    "prerequisites": {
+      "items": [],
+      "repeatable": false,
+      "level": null
+    },
+    "properties": [],
+    "requirements": "",
+    "type": {
+      "value": "",
+      "subtype": ""
+    }
+  },
+  "effects": [],
+  "folder": null,
+  "sort": 0,
+  "ownership": {
+    "default": 0,
+    "Le4JHgEIDIZ0wv5M": 3
+  },
+  "flags": {},
+  "_stats": {
+    "coreVersion": "14.360",
+    "systemId": "dnd5e",
+    "systemVersion": "5.3.2",
+    "createdTime": 1778100925556,
+    "modifiedTime": 1778100940335,
+    "lastModifiedBy": "Le4JHgEIDIZ0wv5M",
+    "compendiumSource": null,
+    "duplicateSource": null,
+    "exportSource": null
+  },
+  "_key": "!items!dAapT1TNVFrhfXCC"
+}
