@@ -50,27 +50,47 @@ function isEladrin(actor) {
     return actor?.getFlag(MODULE_ID, "isEladrin") === true;
 }
 
+async function updateEladrinItemName(actor, season) {
+    const item = actor.items.find(i =>
+        i.getFlag(MODULE_ID, "isEladrinSpeciesItem") === true
+        || (i.type === "race" && i.name.startsWith("Eladrin"))
+    );
+    if (!item) return;
+    const seasonLabel = SEASONS[season]?.label;
+    const newName = seasonLabel ? `Eladrin (${seasonLabel})` : "Eladrin";
+    if (item.name !== newName) await item.update({ name: newName });
+}
+
 // ── Utility: build weapon + tool option lists from CONFIG ─────────────────────
 // In dnd5e v5, tools live in CONFIG.DND5E.tools and weapons in
 // CONFIG.DND5E.weaponTypes (categories) + CONFIG.DND5E.weapons (individuals).
 // We build a flat list of individual/specific entries the player can choose.
 
+// In dnd5e v5, each weapon/tool entry is { ability, id } where `id` is a
+// compendium UUID (e.g. "Compendium.dnd5e.equipment24.Item.phbtulAlchemists").
+// The display name lives on the referenced Item document, not in CONFIG. We
+// resolve it via fromUuidSync, which returns the pack's index entry — fast,
+// no async — provided the pack index has been loaded (see the `ready` hook
+// below, which preloads every pack referenced by these entries).
+
+function resolveEntryLabel(key, data) {
+    if (typeof data === "string") return data;
+    if (data?.id) {
+        const entry = fromUuidSync(data.id);
+        if (entry?.name) return entry.name;
+    }
+    return data?.label ?? key;
+}
+
 function buildProficiencyOptions() {
     const weapons = [];
     const tools = [];
 
-    // Weapon entries — individual weapons (not category keys like "sim"/"mar")
-    const weaponEntries = CONFIG.DND5E.weapons ?? {};
-    for (const [key, data] of Object.entries(weaponEntries)) {
-        const label = typeof data === "string" ? data : (data.label ?? key);
-        weapons.push({ key: `weapon:${key}`, label });
+    for (const [key, data] of Object.entries(CONFIG.DND5E.weapons ?? {})) {
+        weapons.push({ key: `weapon:${key}`, label: resolveEntryLabel(key, data) });
     }
-
-    // Tool entries
-    const toolEntries = CONFIG.DND5E.tools ?? {};
-    for (const [key, data] of Object.entries(toolEntries)) {
-        const label = typeof data === "string" ? data : (data.label ?? key);
-        tools.push({ key: `tool:${key}`, label });
+    for (const [key, data] of Object.entries(CONFIG.DND5E.tools ?? {})) {
+        tools.push({ key: `tool:${key}`, label: resolveEntryLabel(key, data) });
     }
 
     weapons.sort((a, b) => a.label.localeCompare(b.label));
@@ -79,13 +99,46 @@ function buildProficiencyOptions() {
     return { weapons, tools };
 }
 
-function renderProficiencySelect(id, weapons, tools) {
-    const wOpts = weapons.map(w =>
-        `<option value="${w.key}">${w.label}</option>`).join("");
-    const tOpts = tools.map(t =>
-        `<option value="${t.key}">${t.label}</option>`).join("");
+// Preload every compendium pack referenced by weapon/tool entries so that
+// fromUuidSync() can return index entries during the trance dialog. Without
+// this, the first lookup of an unloaded pack returns null and labels fall
+// back to the raw key.
+async function preloadProficiencyPacks() {
+    const packIds = new Set();
+    const collect = entries => {
+        for (const data of Object.values(entries ?? {})) {
+            const uuid = data?.id;
+            if (typeof uuid !== "string") continue;
+            const m = uuid.match(/^Compendium\.([^.]+\.[^.]+)\./);
+            if (m) packIds.add(m[1]);
+        }
+    };
+    collect(CONFIG.DND5E.weapons);
+    collect(CONFIG.DND5E.tools);
+
+    await Promise.all([...packIds].map(id => game.packs.get(id)?.getIndex()));
+}
+
+Hooks.once("ready", preloadProficiencyPacks);
+
+// DialogV2 force-adds the `dialog` class, which the dnd5e2 theme uses to
+// trigger compact, title-hidden dialog styling. We want the full themed-app
+// styling (visible title, gold legends, themed buttons) — so for any dialog
+// we tag with dnd5e2, strip the `dialog` class after render.
+Hooks.on("renderDialogV2", (app, element) => {
+    if (!app.options.classes?.includes("dnd5e2")) return;
+    element.classList.remove("dialog");
+    const footer = element.querySelector("footer.form-footer");
+    if (footer) footer.style.paddingTop = "0.75em";
+});
+
+function renderProficiencySelect(name, weapons, tools, selectedKey) {
+    const opt = ({ key, label }) =>
+        `<option value="${key}"${key === selectedKey ? " selected" : ""}>${label}</option>`;
+    const wOpts = weapons.map(opt).join("");
+    const tOpts = tools.map(opt).join("");
     return `
-    <select id="${id}">
+    <select name="${name}">
       <optgroup label="Weapons">${wOpts}</optgroup>
       <optgroup label="Tools">${tOpts}</optgroup>
     </select>
@@ -97,38 +150,52 @@ function renderProficiencySelect(id, weapons, tools) {
 // Direct actor.update() on the Sets is more reliable in v5 than Active Effects
 // for temporary proficiencies we manage the lifecycle of ourselves.
 
+// In dnd5e v5 (2024 rules) storage differs by type:
+//   • Weapons → system.traits.weaponProf.value (Set of keys)
+//   • Tools   → system.tools[key] = { value, ability, bonuses } (per-tool object)
+// We persist the picks on a flag so the *next* trance can remove them before
+// applying the new pair.
+
 async function applyTranceProficiencies(actor, prof1Key, prof2Key) {
-    // Remove previous trance profs first
     await removeTranceProficiencies(actor);
 
+    const picks = [prof1Key, prof2Key].filter(Boolean).map(k => {
+        const [type, key] = k.split(":");
+        return { type, key };
+    });
+
+    const newWeaponKeys = picks.filter(p => p.type === "weapon").map(p => p.key);
+    const newToolKeys   = picks.filter(p => p.type === "tool").map(p => p.key);
+
     const updates = {};
-    const toApply = [prof1Key, prof2Key];
     const applied = [];
 
-    for (const profKey of toApply) {
-        const [type, key] = profKey.split(":");
-        if (type === "weapon") {
-            const current = new Set(actor.system.traits?.weaponProf?.value ?? []);
-            if (!current.has(key)) {
-                current.add(key);
-                updates["system.traits.weaponProf.value"] = [...current];
-                applied.push({ type, key });
-            }
-        } else if (type === "tool") {
-            const current = new Set(actor.system.traits?.toolProf?.value ?? []);
-            if (!current.has(key)) {
-                current.add(key);
-                updates["system.traits.toolProf.value"] = [...current];
-                applied.push({ type, key });
+    if (newWeaponKeys.length) {
+        const current = new Set(actor.system.traits?.weaponProf?.value ?? []);
+        for (const k of newWeaponKeys) {
+            if (!current.has(k)) {
+                current.add(k);
+                applied.push({ type: "weapon", key: k });
             }
         }
+        updates["system.traits.weaponProf.value"] = [...current];
+    }
+
+    for (const k of newToolKeys) {
+        if (actor.system.tools?.[k]) continue; // already proficient
+        const ability = CONFIG.DND5E.tools?.[k]?.ability ?? "int";
+        updates[`system.tools.${k}`] = {
+            value: 1,
+            ability,
+            bonuses: { check: "" }
+        };
+        applied.push({ type: "tool", key: k });
     }
 
     if (Object.keys(updates).length) {
         await actor.update(updates);
     }
 
-    // Store what we applied so we can clean up next long rest
     await actor.setFlag(MODULE_ID, "tranceProfs", applied);
 }
 
@@ -138,19 +205,16 @@ async function removeTranceProficiencies(actor) {
 
     const updates = {};
 
-    // Group by type to do one update per type
     const weaponKeys = prev.filter(p => p.type === "weapon").map(p => p.key);
-    const toolKeys = prev.filter(p => p.type === "tool").map(p => p.key);
-
     if (weaponKeys.length) {
         const current = new Set(actor.system.traits?.weaponProf?.value ?? []);
         for (const k of weaponKeys) current.delete(k);
         updates["system.traits.weaponProf.value"] = [...current];
     }
-    if (toolKeys.length) {
-        const current = new Set(actor.system.traits?.toolProf?.value ?? []);
-        for (const k of toolKeys) current.delete(k);
-        updates["system.traits.toolProf.value"] = [...current];
+
+    // Foundry deletion syntax: `-=key` removes that subkey from the parent object.
+    for (const { key } of prev.filter(p => p.type === "tool")) {
+        updates[`system.tools.-=${key}`] = null;
     }
 
     if (Object.keys(updates).length) {
@@ -164,42 +228,16 @@ async function removeTranceProficiencies(actor) {
 
 function renderSeasonRadios(currentSeason) {
     return Object.entries(SEASONS).map(([key, s]) => `
-    <label class="es-season-option" style="border-left:4px solid ${s.color};">
+    <label class="checkbox" style="display:flex;align-items:center;gap:8px;padding:4px 0;">
       <input type="radio" name="season" value="${key}"
         ${key === currentSeason ? "checked" : ""}>
-      <span class="es-season-label">${s.icon} ${s.label}</span>
-      <span class="es-season-subdesc">${s.desc}</span>
-      <span class="es-season-effect">${s.effectDesc}</span>
+      <p style="margin:0;line-height:1.4;font-size:1.25em;">
+        <span style="font-weight:bold;color:${s.color};white-space:nowrap;">${s.icon} ${s.label}: </span>
+        <span>${s.desc} — ${s.effectDesc}</span>
+      </p>
     </label>
   `).join("");
 }
-
-const SHARED_STYLES = `
-  <style>
-    .es-dialog p.flavour { font-style:italic; color:#666; margin-bottom:12px; font-size:.9em; }
-    .es-season-option {
-      display:grid;
-      grid-template-columns:auto 1fr;
-      grid-template-rows:auto auto auto;
-      gap:0 8px;
-      align-items:center;
-      padding:6px 10px;
-      margin:4px 0;
-      border-radius:4px;
-      border:1px solid #ccc;
-      background:#fafafa;
-      cursor:pointer;
-    }
-    .es-season-option input { grid-row:span 3; }
-    .es-season-label { font-weight:bold; }
-    .es-season-subdesc { font-size:.82em; color:#555; }
-    .es-season-effect { font-size:.78em; color:#777; font-style:italic; }
-    .es-section-head { margin:12px 0 4px; font-weight:bold; }
-    .es-prof-row { display:flex; gap:8px; margin-top:6px; }
-    .es-prof-row select { flex:1; min-width:0; }
-    .es-hint { font-size:.82em; color:#666; margin:2px 0 8px; }
-  </style>
-`;
 
 // ── Hook 1: Species assignment → setup dialog ─────────────────────────────────
 // Fires when any item is added via the advancement manager.
@@ -226,65 +264,77 @@ Hooks.on("createItem", async (item, options, userId) => {
     await new Promise(r => setTimeout(r, 300));
 
     const content = `
-    ${SHARED_STYLES}
-    <div class="es-dialog">
-      <p class="flavour">
+    <section class="flexcol" style="gap:10px;">
+      <div class="note info">
         ${actor.name} steps from the Feywild, shaped by its boundless magic.
         Choose their starting season and the ability score their Fey Step
         effects will key off when they reach 3rd level.
-      </p>
-      <p class="es-section-head">Starting Season</p>
-      ${renderSeasonRadios("spring")}
-      <p class="es-section-head">Fey Step Save DC Ability</p>
-      <p class="es-hint">
-        Used by Autumn (Charm) and Winter (Frighten) effects at level 3+.
-        DC = 8 + proficiency bonus + chosen modifier.
-      </p>
-      <select id="es-dc" style="width:100%;">
-        <option value="int">Intelligence</option>
-        <option value="wis">Wisdom</option>
-        <option value="cha" selected>Charisma</option>
-      </select>
-    </div>
+      </div>
+      <fieldset>
+        <legend>Starting Season</legend>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          ${renderSeasonRadios("spring")}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Fey Step Save DC Ability</legend>
+        <p class="hint" style="margin:0 0 6px;">
+          Used by Autumn (Charm) and Winter (Frighten) effects at level 3+.
+          DC = 8 + proficiency bonus + chosen modifier.
+        </p>
+        <select name="dcAbility" style="width:100%;">
+          <option value="int">Intelligence</option>
+          <option value="wis">Wisdom</option>
+          <option value="cha" selected>Charisma</option>
+        </select>
+      </fieldset>
+    </section>
   `;
 
-    new Dialog({
-        title: `Eladrin — ${actor.name}`,
+    const result = await foundry.applications.api.DialogV2.wait({
+        window: { title: `Eladrin — ${actor.name}` },
+        classes: ["dnd5e2"],
+        position: { width: 480 },
         content,
-        buttons: {
-            confirm: {
-                icon: `<i class="fas fa-leaf"></i>`,
+        buttons: [
+            {
+                action: "confirm",
+                icon: "fas fa-leaf",
                 label: "Enter the Feywild",
-                callback: async (html) => {
-                    const season = html.find("input[name='season']:checked").val() ?? "spring";
-                    const dcAbility = html.find("#es-dc").val() ?? "cha";
-                    const s = SEASONS[season];
-
-                    await actor.setFlag(MODULE_ID, "isEladrin", true);
-                    await actor.setFlag(MODULE_ID, "season", season);
-                    await actor.setFlag(MODULE_ID, "saveDCAbility", dcAbility);
-
-                    await ChatMessage.create({
-                        speaker: ChatMessage.getSpeaker({ actor }),
-                        content: `
-              <div style="border:2px solid ${s.color};border-radius:6px;padding:10px;background:#fafafa;">
-                <strong>🧝 ${actor.name} — Eladrin of ${s.icon} ${s.label}</strong><br>
-                <em style="color:#666;font-size:.9em;">${s.desc} — ${s.effectDesc}</em><br>
-                <small>Their season shifts with each long rest.</small>
-              </div>
-            `
-                    });
-                }
+                default: true,
+                callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object
             },
-            later: {
-                label: "Set Up Later",
-                callback: () => ui.notifications.warn(
-                    `Eladrin setup skipped for ${actor.name}. Re-add the species item to configure.`
-                )
-            }
-        },
-        default: "confirm"
-    }).render(true);
+            { action: "later", label: "Set Up Later" }
+        ],
+        rejectClose: false
+    });
+
+    if (!result || result === "later") {
+        ui.notifications.warn(
+            `Eladrin setup skipped for ${actor.name}. Re-add the species item to configure.`
+        );
+        return;
+    }
+
+    const season = result.season ?? "spring";
+    const dcAbility = result.dcAbility ?? "cha";
+    const s = SEASONS[season];
+
+    await actor.setFlag(MODULE_ID, "isEladrin", true);
+    await actor.setFlag(MODULE_ID, "season", season);
+    await actor.setFlag(MODULE_ID, "saveDCAbility", dcAbility);
+    await updateEladrinItemName(actor, season);
+
+    await ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `
+      <div style="border:2px solid ${s.color};border-radius:6px;padding:10px;background:#fafafa;">
+        <strong>🧝 ${actor.name} — Eladrin of ${s.icon} ${s.label}</strong><br>
+        <em style="color:#666;font-size:.9em;">${s.desc} — ${s.effectDesc}</em><br>
+        <small>Their season shifts with each long rest.</small>
+      </div>
+    `
+    });
 });
 
 // ── Hook 2: Long rest → Trance dialog ────────────────────────────────────────
@@ -298,78 +348,82 @@ Hooks.on("dnd5e.restCompleted", async (actor, data) => {
     const currentSeason = actor.getFlag(MODULE_ID, "season") ?? "spring";
     const { weapons, tools } = buildProficiencyOptions();
 
+    const prevPicks = actor.getFlag(MODULE_ID, "tranceProfs") ?? [];
+    const prevKey = i => prevPicks[i] ? `${prevPicks[i].type}:${prevPicks[i].key}` : undefined;
+
     const content = `
-    ${SHARED_STYLES}
-    <div class="es-dialog">
-      <p class="flavour">
+    <section class="flexcol" style="gap:10px;">
+      <div class="note info">
         ${actor.name} finishes 4 hours of trancelike meditation, drawing on
         the shared memory of elvenkind and the shifting magic of the Feywild.
-      </p>
-      <p class="es-section-head">Choose Your Season</p>
-      ${renderSeasonRadios(currentSeason)}
-      <p class="es-section-head" style="margin-top:14px;">
-        Trance Proficiencies
-      </p>
-      <p class="es-hint">
-        Choose 2 weapons or tools. These proficiencies last until your
-        next long rest, drawn from shared elven memory.
-      </p>
-      <div class="es-prof-row">
-        ${renderProficiencySelect("es-prof1", weapons, tools)}
-        ${renderProficiencySelect("es-prof2", weapons, tools)}
       </div>
-    </div>
+      <fieldset>
+        <legend>Choose Your Season</legend>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          ${renderSeasonRadios(currentSeason)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Trance Proficiencies</legend>
+        <p class="hint" style="margin:0 0 6px;">
+          Choose 2 weapons or tools. These proficiencies last until your
+          next long rest, drawn from shared elven memory.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${renderProficiencySelect("prof1", weapons, tools, prevKey(0))}
+          ${renderProficiencySelect("prof2", weapons, tools, prevKey(1))}
+        </div>
+      </fieldset>
+    </section>
   `;
 
-    return new Promise(resolve => {
-        new Dialog({
-            title: `Eladrin Trance — ${actor.name}`,
-            content,
-            buttons: {
-                confirm: {
-                    icon: `<i class="fas fa-moon"></i>`,
-                    label: "Complete the Trance",
-                    callback: async (html) => {
-                        const newSeason = html.find("input[name='season']:checked").val() ?? currentSeason;
-                        const prof1 = html.find("#es-prof1").val();
-                        const prof2 = html.find("#es-prof2").val();
-                        const s = SEASONS[newSeason];
-
-                        await actor.setFlag(MODULE_ID, "season", newSeason);
-                        await applyTranceProficiencies(actor, prof1, prof2);
-
-                        // Resolve labels for chat
-                        const { weapons: wList, tools: tList } = buildProficiencyOptions();
-                        const allProfs = [...wList, ...tList];
-                        const labelOf = key => allProfs.find(p => p.key === key)?.label ?? key.split(":")[1];
-
-                        await ChatMessage.create({
-                            speaker: ChatMessage.getSpeaker({ actor }),
-                            content: `
-                <div style="border:2px solid ${s.color};border-radius:6px;padding:10px;background:#fafafa;">
-                  <strong>🧝 ${actor.name} — Eladrin Trance</strong><br>
-                  Season: <strong style="color:${s.color};">${s.icon} ${s.label}</strong>
-                  <em style="color:#666;font-size:.9em;"> — ${s.effectDesc}</em><br>
-                  <small>
-                    Draws <strong>${labelOf(prof1)}</strong> and
-                    <strong>${labelOf(prof2)}</strong>
-                    from elven memory until next long rest.
-                  </small>
-                </div>
-              `
-                        });
-
-                        resolve();
-                    }
-                },
-                skip: {
-                    label: "Skip",
-                    callback: resolve
-                }
+    const result = await foundry.applications.api.DialogV2.wait({
+        window: { title: `Eladrin Trance — ${actor.name}` },
+        classes: ["dnd5e2"],
+        position: { width: 480 },
+        content,
+        buttons: [
+            {
+                action: "confirm",
+                icon: "fas fa-moon",
+                label: "Complete the Trance",
+                default: true,
+                callback: (event, button) => new foundry.applications.ux.FormDataExtended(button.form).object
             },
-            default: "confirm",
-            close: resolve
-        }).render(true);
+            { action: "skip", label: "Skip" }
+        ],
+        rejectClose: false
+    });
+
+    if (!result || result === "skip") return;
+
+    const newSeason = result.season ?? currentSeason;
+    const prof1 = result.prof1;
+    const prof2 = result.prof2;
+    const s = SEASONS[newSeason];
+
+    await actor.setFlag(MODULE_ID, "season", newSeason);
+    await updateEladrinItemName(actor, newSeason);
+    await applyTranceProficiencies(actor, prof1, prof2);
+
+    const { weapons: wList, tools: tList } = buildProficiencyOptions();
+    const allProfs = [...wList, ...tList];
+    const labelOf = key => allProfs.find(p => p.key === key)?.label ?? key?.split(":")[1] ?? "";
+
+    await ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `
+      <div style="border:2px solid ${s.color};border-radius:6px;padding:10px;background:#fafafa;">
+        <strong>🧝 ${actor.name} — Eladrin Trance</strong><br>
+        Season: <strong style="color:${s.color};">${s.icon} ${s.label}</strong>
+        <em style="color:#666;font-size:.9em;"> — ${s.effectDesc}</em><br>
+        <small>
+          Draws <strong>${labelOf(prof1)}</strong> and
+          <strong>${labelOf(prof2)}</strong>
+          from elven memory until next long rest.
+        </small>
+      </div>
+    `
     });
 });
 

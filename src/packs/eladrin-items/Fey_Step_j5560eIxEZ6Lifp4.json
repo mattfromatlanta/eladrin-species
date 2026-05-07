@@ -1,7 +1,7 @@
 {
   "name": "Fey Step",
   "type": "feat",
-  "img": "systems/dnd5e/icons/svg/items/feature.svg",
+  "img": "modules/eladrin-species/assets/fey_step_icon.png",
   "system": {
     "activities": {
       "NFIjwyEtSn0VoSsu": {
@@ -28,6 +28,7 @@
           ]
         },
         "description": {
+          "value": "<p>As a bonus action, you can magically teleport up to 30 feet to an unoccupied space you can see. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.</p><p>3rd Level: Fey Step gains an additional effect based on your current season. The save DC equals 8 + your proficiency bonus + your chosen mental ability modifier (set when the species is assigned).</p>",
           "chatFlavor": ""
         },
         "duration": {

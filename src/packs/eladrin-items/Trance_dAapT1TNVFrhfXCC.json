@@ -2,7 +2,7 @@
   "name": "Trance",
   "type": "feat",
   "_id": "dAapT1TNVFrhfXCC",
-  "img": "systems/dnd5e/icons/svg/items/feature.svg",
+  "img": "modules/eladrin-species/assets/trance_icon.png",
   "system": {
     "activities": {},
     "uses": {
