@@ -447,11 +447,15 @@ Hooks.on("dnd5e.postUseActivity", async (activity, usageConfig, results) => {
     const targets = [...game.user.targets];
     const s = SEASONS[season];
 
+    // dnd5e 5.x: Actor5e#rollAbilitySave was removed in favor of #rollSavingThrow,
+    // which takes a config object ({ ability, target }) and resolves to a D20Roll[]
+    // (the DC goes in `target`, surfacing roll.isSuccess / roll.isFailure).
     async function rollSave(target) {
-        return target.actor.rollAbilitySave("wis", {
-            targetValue: saveDC,
-            chatMessage: true
+        const rolls = await target.actor.rollSavingThrow({
+            ability: "wis",
+            target: saveDC
         });
+        return rolls?.[0] ?? null;
     }
 
     switch (season) {
@@ -462,7 +466,7 @@ Hooks.on("dnd5e.postUseActivity", async (activity, usageConfig, results) => {
             const victims = targets.slice(0, 2);
             for (const t of victims) {
                 const roll = await rollSave(t);
-                if (roll?.total < saveDC)
+                if (roll?.isFailure)
                     await t.actor.toggleStatusEffect("charmed", { active: true });
             }
             await ChatMessage.create({
@@ -480,7 +484,7 @@ Hooks.on("dnd5e.postUseActivity", async (activity, usageConfig, results) => {
                 return ui.notifications.warn("Winter Fey Step: target 1 creature first.");
             const t = targets[0];
             const roll = await rollSave(t);
-            if (roll?.total < saveDC)
+            if (roll?.isFailure)
                 await t.actor.toggleStatusEffect("frightened", { active: true });
             await ChatMessage.create({
                 speaker: ChatMessage.getSpeaker({ actor }),
